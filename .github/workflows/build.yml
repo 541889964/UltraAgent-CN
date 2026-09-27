@@ -12,28 +12,53 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-      - name: Show SDK / NDK
+
+      - name: Install CMake 3.28.3 + NDK
         run: |
-          echo "SDK: $ANDROID_HOME"
-          ls $ANDROID_HOME/ndk/ 2>/dev/null || echo "no ndk preinstalled"
+          yes | sdkmanager --install "cmake;3.28.3" "ndk;26.1.10909125" 2>&1 | tail -5
+          echo "=== 已装 ==="
+          ls $ANDROID_HOME/cmake/ 2>/dev/null
+          ls $ANDROID_HOME/ndk/ 2>/dev/null
+
+      - name: Extract source (if tarred)
+        run: |
+          ls -la
+          if [ -f src.tar.gz ]; then
+            tar xzf src.tar.gz
+            echo "解压完成"
+          fi
+
+      - name: Show project structure
+        run: |
+          find . -name gradlew -type f | head -5
+          find . -name CMakeLists.txt | head -5
+
       - name: Build
         run: |
-          DIR=$(dirname $(find . -name gradlew | head -1))
+          DIR=$(dirname $(find . -name gradlew -type f | head -1))
           echo "项目目录: $DIR"
           cd "$DIR"
           chmod +x gradlew
+          # 强制用 sdkmanager 装的 cmake
+          echo "cmake.dir=$ANDROID_HOME/cmake/3.28.3" >> local.properties
+          echo "sdk.dir=$ANDROID_HOME" >> local.properties
+          echo "ndk.dir=$ANDROID_HOME/ndk/26.1.10909125" >> local.properties
+          cat local.properties
           ./gradlew assembleDebug --no-daemon --stacktrace
+
       - name: Collect
         if: always()
         run: |
           mkdir -p release
           find . -name "*.apk" -exec cp {} release/ \; 2>/dev/null || true
           ls -lh release/
+
       - uses: actions/upload-artifact@v4
         if: hashFiles('release/*') != ''
         with:
           name: UltraAgent-CN
           path: release/*
+
       - uses: softprops/action-gh-release@v2
         if: hashFiles('release/*') != ''
         with:
