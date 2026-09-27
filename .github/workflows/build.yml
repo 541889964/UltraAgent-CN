@@ -13,25 +13,51 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Install CMake 3.28.3 + NDK
+      - name: Setup Android SDK & find tools
         run: |
-          yes | sdkmanager --install "cmake;3.28.3" "ndk;26.1.10909125" 2>&1 | tail -5
-          echo "=== 已装 ==="
-          ls $ANDROID_HOME/cmake/ 2>/dev/null
-          ls $ANDROID_HOME/ndk/ 2>/dev/null
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          echo "=== 找 sdkmanager ==="
+          find / -name sdkmanager -type f 2>/dev/null | head -5
+          echo "=== SDK 目录 ==="
+          ls "$ANDROID_HOME" 2>/dev/null || echo "SDK 目录不存在"
+          echo "=== 现有 cmake ==="
+          ls "$ANDROID_HOME/cmake" 2>/dev/null || echo "无 cmake"
+          echo "=== 现有 NDK ==="
+          ls "$ANDROID_HOME/ndk" 2>/dev/null || echo "无 NDK"
 
-      - name: Extract source (if tarred)
+      - name: Install CMake + NDK
+        run: |
+          SDKMANAGER=$(find / -name sdkmanager -type f 2>/dev/null | head -1)
+          if [ -z "$SDKMANAGER" ]; then
+            echo "sdkmanager 不存在，尝试下载 cmdline-tools"
+            mkdir -p "$ANDROID_HOME/cmdline-tools"
+            cd /tmp
+            curl -fsSL -o cmdline.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+            unzip -q cmdline.zip -d "$ANDROID_HOME/cmdline-tools"
+            mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest" 2>/dev/null || true
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          fi
+          echo "使用: $SDKMANAGER"
+          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
+          yes | "$SDKMANAGER" --install "cmake;3.22.1" "ndk;26.1.10909125" 2>&1 | tail -3
+          echo "=== 装后 ==="
+          ls "$ANDROID_HOME/cmake" 2>/dev/null
+          ls "$ANDROID_HOME/ndk" 2>/dev/null
+
+      - name: Extract source
         run: |
           ls -la
-          if [ -f src.tar.gz ]; then
-            tar xzf src.tar.gz
-            echo "解压完成"
-          fi
+          if [ -f src.tar.gz ]; then tar xzf src.tar.gz; fi
 
-      - name: Show project structure
+      - name: Patch CMake version in project
         run: |
-          find . -name gradlew -type f | head -5
-          find . -name CMakeLists.txt | head -5
+          # 把项目里的 cmake 版本改成 3.22.1（runner 上稳）
+          grep -rl "cmake.*3\.28\.3\|version.*3\.28\.3" --include="*.kts" --include="*.gradle" . 2>/dev/null | while read f; do
+            echo "patch: $f"
+            sed -i 's/3\.28\.3/3.22.1/g' "$f"
+          done
+          grep -rl "cmake.*3\.28\.3" . 2>/dev/null | head -3
 
       - name: Build
         run: |
@@ -39,10 +65,8 @@ jobs:
           echo "项目目录: $DIR"
           cd "$DIR"
           chmod +x gradlew
-          # 强制用 sdkmanager 装的 cmake
-          echo "cmake.dir=$ANDROID_HOME/cmake/3.28.3" >> local.properties
-          echo "sdk.dir=$ANDROID_HOME" >> local.properties
-          echo "ndk.dir=$ANDROID_HOME/ndk/26.1.10909125" >> local.properties
+          # 只写 sdk.dir，不写 ndk.dir / cmake.dir，让 Gradle 自己找
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
           cat local.properties
           ./gradlew assembleDebug --no-daemon --stacktrace
 
