@@ -1,0 +1,44 @@
+name: Build
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      - name: Show SDK / NDK
+        run: |
+          echo "SDK: $ANDROID_HOME"
+          ls $ANDROID_HOME/ndk/ 2>/dev/null || echo "no ndk preinstalled"
+      - name: Build
+        run: |
+          DIR=$(dirname $(find . -name gradlew | head -1))
+          echo "项目目录: $DIR"
+          cd "$DIR"
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+      - name: Collect
+        if: always()
+        run: |
+          mkdir -p release
+          find . -name "*.apk" -exec cp {} release/ \; 2>/dev/null || true
+          ls -lh release/
+      - uses: actions/upload-artifact@v4
+        if: hashFiles('release/*') != ''
+        with:
+          name: UltraAgent-CN
+          path: release/*
+      - uses: softprops/action-gh-release@v2
+        if: hashFiles('release/*') != ''
+        with:
+          tag_name: v${{ github.run_number }}
+          files: release/*
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
