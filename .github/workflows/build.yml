@@ -5,89 +5,119 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - name: Setup Android SDK & find tools
+      - name: Clone original repo
         run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
-          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
-          echo "=== 找 sdkmanager ==="
-          find / -name sdkmanager -type f 2>/dev/null | head -5
-          echo "=== SDK 目录 ==="
-          ls "$ANDROID_HOME" 2>/dev/null || echo "SDK 目录不存在"
-          echo "=== 现有 cmake ==="
-          ls "$ANDROID_HOME/cmake" 2>/dev/null || echo "无 cmake"
-          echo "=== 现有 NDK ==="
-          ls "$ANDROID_HOME/ndk" 2>/dev/null || echo "无 NDK"
+          git clone --depth 1 https://github.com/dafarusd/Ultra-Agent.git /tmp/src
+          ls /tmp/src/
 
-      - name: Install CMake + NDK
+      - name: Apply Chinese translation
         run: |
-          SDKMANAGER=$(find / -name sdkmanager -type f 2>/dev/null | head -1)
-          if [ -z "$SDKMANAGER" ]; then
-            echo "sdkmanager 不存在，尝试下载 cmdline-tools"
+          python3 << 'PY'
+          import os, re, pathlib
+          MAP = {
+              "+ New chat": "+ 新对话", "API key": "API 密钥", "Allow": "允许",
+              "Allow all of the above": "允许以上全部",
+              "Ask Agent Ultra…": "向 Agent Ultra 提问…",
+              "Auto-copy verification codes": "自动复制验证码",
+              "Base URL": "服务地址", "Cancel": "取消",
+              "Choose assistant app": "选择助手应用", "Confirm": "确认",
+              "Delete": "删除", "Delete file": "删除文件", "Delete log": "删除日志",
+              "Delete notification log": "删除通知日志", "Do it": "执行",
+              "Don't": "不要", "Done": "完成", "Download": "下载",
+              "Download custom model": "下载自定义模型",
+              "Export & share": "导出并分享", "Free memory": "释放内存",
+              "Keep a notification log": "保留通知日志",
+              "Messages, contacts and location": "消息、联系人和位置",
+              "Model": "模型", "Only apps I choose": "仅限我选择的应用",
+              "Open": "打开",
+              "Open this app in Android settings": "在系统设置中打开本应用",
+              "Or paste a GGUF download URL": "或粘贴 GGUF 下载链接",
+              "Reading notifications": "读取通知", "Save": "保存",
+              "Scam warnings": "诈骗警告", "Search apps": "搜索应用",
+              "Send": "发送", "Speak again": "再说一遍",
+              "Speak answers aloud": "朗读答案",
+              "System event triggers": "系统事件触发",
+              "ultra": "超能", "← Back": "← 返回",
+              "New chat": "新对话", "Settings": "设置",
+              "Model is loading": "模型加载中",
+              "Thinking…": "思考中…", "Thinking...": "思考中...",
+              "a11y on": "无障碍已开", "a11y off": "无障碍关闭",
+              "agent: ready": "助手: 就绪", "Download failed": "下载失败",
+              "Loading": "加载中", "Error": "错误", "Warning": "警告",
+              "Success": "成功", "Retry": "重试", "Close": "关闭",
+              "Yes": "是", "No": "否", "OK": "好",
+          }
+          cnt = 0
+          for root, _, files in os.walk("/tmp/src"):
+              for f in files:
+                  if not f.endswith(".kt"): continue
+                  p = pathlib.Path(root) / f
+                  try: s = p.read_text(encoding="utf-8")
+                  except: continue
+                  o = s
+                  for en, zh in MAP.items():
+                      s = re.sub(r'Text\("' + re.escape(en) + r'"', 'Text("' + zh + '"', s)
+                      s = re.sub(r'contentDescription = "' + re.escape(en) + r'"', 'contentDescription = "' + zh + '"', s)
+                  if s != o:
+                      p.write_text(s, encoding="utf-8"); cnt += 1
+          print(f"已汉化 {cnt} 个文件")
+          PY
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with: { java-version: '17', distribution: 'temurin' }
+
+      - name: Install Android SDK / NDK / CMake
+        run: |
+          # runner 自带的 cmdline-tools
+          SDKMGR="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMGR" ]; then
             mkdir -p "$ANDROID_HOME/cmdline-tools"
-            cd /tmp
-            curl -fsSL -o cmdline.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-            unzip -q cmdline.zip -d "$ANDROID_HOME/cmdline-tools"
-            mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest" 2>/dev/null || true
-            SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+            curl -fsSL -o /tmp/c.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+            unzip -q /tmp/c.zip -d "$ANDROID_HOME/cmdline-tools"
+            mv "$ANDROID_HOME/cmdline-tools/cmdline-tools" "$ANDROID_HOME/cmdline-tools/latest"
+            SDKMGR="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
           fi
-          echo "使用: $SDKMANAGER"
-          yes | "$SDKMANAGER" --licenses >/dev/null 2>&1 || true
-          yes | "$SDKMANAGER" --install "cmake;3.22.1" "ndk;26.1.10909125" 2>&1 | tail -3
-          echo "=== 装后 ==="
-          ls "$ANDROID_HOME/cmake" 2>/dev/null
-          ls "$ANDROID_HOME/ndk" 2>/dev/null
+          yes | "$SDKMGR" --licenses >/dev/null 2>&1 || true
+          yes | "$SDKMGR" --install "cmake;3.22.1" "ndk;26.1.10909125" 2>&1 | tail -3
+          ls "$ANDROID_HOME/cmake/" || true
+          ls "$ANDROID_HOME/ndk/" || true
 
-      - name: Extract source
+      - name: Patch cmake version
         run: |
-          ls -la
-          if [ -f src.tar.gz ]; then tar xzf src.tar.gz; fi
-
-      - name: Patch CMake version in project
-        run: |
-          # 把项目里的 cmake 版本改成 3.22.1（runner 上稳）
-          grep -rl "cmake.*3\.28\.3\|version.*3\.28\.3" --include="*.kts" --include="*.gradle" . 2>/dev/null | while read f; do
-            echo "patch: $f"
-            sed -i 's/3\.28\.3/3.22.1/g' "$f"
+          find /tmp/src -name "*.gradle*" -o -name "*.kts" | while read f; do
+            sed -i 's/3\.28\.3/3.22.1/g; s/3\.30\.[0-9]/3.22.1/g' "$f"
           done
-          grep -rl "cmake.*3\.28\.3" . 2>/dev/null | head -3
 
       - name: Build
         run: |
+          cd /tmp/src
           DIR=$(dirname $(find . -name gradlew -type f | head -1))
-          echo "项目目录: $DIR"
           cd "$DIR"
           chmod +x gradlew
-          # 只写 sdk.dir，不写 ndk.dir / cmake.dir，让 Gradle 自己找
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-          cat local.properties
           ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Collect
         if: always()
         run: |
-          mkdir -p release
-          find . -name "*.apk" -exec cp {} release/ \; 2>/dev/null || true
-          ls -lh release/
+          mkdir -p /tmp/release
+          find /tmp/src -name "*.apk" -exec cp {} /tmp/release/ \; 2>/dev/null || true
+          ls -lh /tmp/release/
 
       - uses: actions/upload-artifact@v4
-        if: hashFiles('release/*') != ''
+        if: hashFiles('/tmp/release/*') != ''
         with:
           name: UltraAgent-CN
-          path: release/*
+          path: /tmp/release/*
 
       - uses: softprops/action-gh-release@v2
-        if: hashFiles('release/*') != ''
+        if: hashFiles('/tmp/release/*') != ''
         with:
           tag_name: v${{ github.run_number }}
-          files: release/*
+          files: /tmp/release/*
           prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
